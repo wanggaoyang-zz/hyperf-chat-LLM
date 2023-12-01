@@ -2,9 +2,9 @@
 
 namespace AI\Chat\Bean;
 
-class ChatBean extends SplBean
+class ChatBean extends SplBean implements BeanInterface
 {
-    protected string $api_key = '';//key
+    protected string $api_key = '';//key chatGPT的秘钥
     protected string $url = '';//请求地址
     protected string $model = '';//模型
     protected array $messages = [];//消息内容

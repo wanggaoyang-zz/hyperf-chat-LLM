@@ -2,61 +2,53 @@
 
 namespace AI\Chat\Library;
 
-use App\Bean\ResponseChatBean;
-use App\Constants\ErrorCode;
-use App\Exception\BusinessException;
-use App\Kernel\AIEngine\Engine\EngineAlarm;
-use App\Kernel\ChatEngine\Engine\BaseEngine;
-use App\Kernel\EventStream\ChatStream;
-use App\Model\ApiAccount;
+
+
+use AI\Chat\Bean\BeanInterface;
+use AI\Chat\Bean\ResponseChatBean;
+use AI\Chat\Bean\SparkBean;
+use AI\Chat\Constants\ErrorCode;
+use AI\Chat\Kernel\EventStream\ChatStream;
 use DateTime;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\WebSocketClient\ClientFactory;
 
-class SparkEngine extends BaseEngine
+class Spark implements LLMInterface
 {
 
     #[Inject]
     protected ClientFactory $clientFactory;
 
-    protected string $addr = 'wss://spark-api.xf-yun.com/v3.1/chat';
 
-    public function send(): ?ResponseChatBean
+    public function send(BeanInterface $chatBean): ?ResponseChatBean
     {
-        $prompt    = $this->chatBean->getPrompt();
-        $messages    = $this->chatBean->getMessages();
-        $messageId = $this->chatBean->getMessageId();
-        $model = $this->chatBean->getModel();
-        $stream = $this->chatBean->getStream();
-        $functions = $this->chatBean->getFunctions();
-
+        /** @var SparkBean $chatBean */
+        $chatBean->setAddr(\Hyperf\Config\config('llm.storage.Spark.addr'));
+        $chatBean->setAppid(\Hyperf\Config\config('llm.storage.Spark.appid'));
+        $chatBean->setApiSecret(\Hyperf\Config\config('llm.storage.Spark.api_secret'));
+        $chatBean->setApiKey(\Hyperf\Config\config('llm.storage.Spark.api_key'));
+        $messages    = $chatBean->getMessages();
+        if ($chatBean->getPrompt()) {
+            $messages[] = [
+                'role' => 'user',
+                'content' => $chatBean->getPrompt(),
+            ];
+        }
+        $stream = $chatBean->getStream();
+        $functions = $chatBean->getFunctions();
         $responseBean = new ResponseChatBean([
-            'conversation_id'   => $this->chatBean->getConversationId(),
-            'parent_message_id' => $messageId,
-            'user_id'           => $this->chatBean->getUserId(),
+            'conversation_id'   => $chatBean->getConversationId(),
             'id' => uuid(16),
             'created' => time(),
             'object' => 'chat.completion',
-            'choices'           => [],
+            'choices' => [],
         ]);
-
-//        $appid = "c7ddfd0a";
-//        $api_key = "f8846795bac912ca335f85b835991eac";
-//        $api_secret = "YmY2YjYxMjFiMjU1NjEyZGFmMjY5MzZj";
-        $api_key = $this->chatBean->getApiKey($model);
-        $api_secret = $this->chatBean->getApiOption('api_secret');
-        $appid = $this->chatBean->getApiOption('appid');
-
-        $chat_url = $this->assembleAuthUrl($api_secret, $api_key, $this->addr);
+        $chat_url = $this->assembleAuthUrl( $chatBean->getApiSecret(),  $chatBean->getApiKey(), $chatBean->getAddr());
         $client = $this->clientFactory->create($chat_url);
         // 发送数据到 WebSocket 服务器
-        $data = $this->getBody($appid,$messages,$functions);
+        $data = $this->getBody($chatBean, $chatBean->getAppid(),$messages,$functions);
         p($data, '发送给星火的body');
         $client->push($data);
-        // $response = $client->recv()->data;
-        // $resp = json_decode($response,true);
-        // p($resp);exit();
-
         // 从 WebSocket 服务器接收数据
         $answer = "";
         while(true){
@@ -73,7 +65,7 @@ class SparkEngine extends BaseEngine
                 $content = $resp['payload']['choices']['text'][0]['content'];
                 $function_call = $resp['payload']['choices']['text'][0]['function_call'] ?? null;
                 $data = [
-                    'model' => $this->chatBean->getModel(),
+                    'model' => $chatBean->getModel(),
                     'id' => $resp['header']['sid'] ?? microtime(),
                     'object' => 'chat.completion.chunk',
                     'choices' => [
@@ -91,12 +83,6 @@ class SparkEngine extends BaseEngine
                 ];
                 if($status == 2){
                     $answer .= $content;
-                    //$total_tokens = $resp['payload']['usage']['text']['total_tokens'];
-//                $message = Message::query()->where('message_id', $this->chatBean->getMessageId())->first();
-//                if($message){
-//                    $message->response_content = $text;
-//                    $message->save();
-//                }
                     if($stream === true){
                         ChatStream::send("data: " . json_encode($data, 256) . PHP_EOL);
                         ChatStream::end("data: [DONE]" . PHP_EOL);
@@ -115,20 +101,12 @@ class SparkEngine extends BaseEngine
                 p("服务返回报错".$response);
                 $error_code = $resp["header"]["code"] ?? 0;
                 $error_message = $resp["header"]["message"] ?? '';
-                $apiAccount = ApiAccount::query()->where('key_id', $this->chatBean->getKeyId())->first();
-                EngineAlarm::make()
-                    ->setEngineName('讯飞星火')
-                    ->setKeyId($apiAccount->key_id)
-                    ->setApiKey($apiAccount->api_key)
-                    ->setErrorMsg($error_message)
-                    ->setErrorCode($error_code)
-                    ->send();
                 $exception_code = match ($error_code) {
                     10907,11200,11201,11202,11203 => ErrorCode::ERROR_SPARK_API_LIMIT,
                     10013,10014,10015,10019 => ErrorCode::ERROR_SPARK_INVALID,
                     default => ErrorCode::ERROR_SPARK_UNKNOWN_ERROR,
                 };
-                throw new BusinessException($exception_code);
+                throw new \Exception($exception_code);
             }
         }
         //p('返回结果为:'.$answer);
@@ -147,18 +125,17 @@ class SparkEngine extends BaseEngine
     }
 
     //构造参数体
-    public function getBody($appid,$messages,$functions)
+    public function getBody(SparkBean $chatBean,$appid,$messages,$functions)
     {
         $header = array(
             "app_id" => (string)$appid,
-            "uid" => (string)($this->chatBean->getUserId() ?? 1)
         );
 
-        $temperature = $this->chatBean->getTemperature() ?? 0.5;
+        $temperature = $chatBean->getTemperature() ?? 0.5;
         if($temperature <= 0 ){
             $temperature = 0.5;
         }
-//        $max_tokens = $this->chatBean->getMaxTokens() ?? 8192;
+//        $max_tokens = $chatBean->getMaxTokens() ?? 8192;
 //        if($max_tokens <= 0 ){
 //            $max_tokens = 8192;
 //        }
@@ -228,23 +205,6 @@ class SparkEngine extends BaseEngine
         ];
         // 拼接鉴权参数，生成url
         return $addr . '?' . http_build_query($v);
-    }
-
-    public function check($app_id, $api_key, $api_secret)
-    {
-        $chat_url = $this->assembleAuthUrl($api_secret, $api_key, $this->addr);
-        $client = $this->clientFactory->create($chat_url);
-        // 发送数据到 WebSocket 服务器
-        $data = $this->getBody($app_id,'1+1=?', []);
-        $client->push($data);
-        $response = $client->recv()->data;
-        $resp = json_decode($response,true);
-        $code = $resp["header"]["code"] ?? 0;
-        $message = $resp["header"]["message"] ?? 0;
-        return [
-            'error_code' => $code,
-            'error_message' => $message,
-        ];
     }
 
     public function parseData($data): ?ResponseChatBean

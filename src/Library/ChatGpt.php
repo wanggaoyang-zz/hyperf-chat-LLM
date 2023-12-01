@@ -7,18 +7,21 @@ use AI\Chat\Bean\ChatBean;
 use AI\Chat\Bean\ResponseChatBean;
 use AI\Chat\Kernel\EventStream\ChatStream;
 use Orhanerday\OpenAi\OpenAi;
-use function Symfony\Component\Translation\t;
+use AI\Chat\Bean\BeanInterface;
 
 class ChatGpt implements LLMInterface
 {
-    public function send(ChatBean $chatBean): ?ResponseChatBean
+    public function send(BeanInterface $chatBean): ?ResponseChatBean
     {
+
+        /** @var ChatBean $chatBean */
         $prompt = $chatBean->getPrompt();
         $chatBean->setApiKey(\Hyperf\Config\config('llm.storage.ChatGpt.key'));
+        $chatBean->setUrl(\Hyperf\Config\config('llm.storage.ChatGpt.url'));
         $responseJsonDescription = $chatBean->getResponseJsonDescription();
         $responseJson = $chatBean->getResponseFormat();
         $openai = new OpenAi($chatBean->getApiKey());
-        $openai->setCustomURL(\Hyperf\Config\config('llm.storage.ChatGpt.url'));
+        $openai->setCustomURL($chatBean->getUrl());
         $message = $chatBean->getMessages();
         if ($prompt) {
             $message[] = [
@@ -129,7 +132,6 @@ class ChatGpt implements LLMInterface
     {
         $text = '';
         return function ($ch, $response) use ( &$text) {
-            var_dump(time());
             $error = self::handleEventStreamError($response);
             if ($error) {
                 self::handleChatGPTAPIError($error);
