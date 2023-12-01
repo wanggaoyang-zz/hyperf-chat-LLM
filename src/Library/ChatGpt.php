@@ -9,17 +9,16 @@ use AI\Chat\Kernel\EventStream\ChatStream;
 use Orhanerday\OpenAi\OpenAi;
 use function Symfony\Component\Translation\t;
 
-
-class ChatGpt implements ChatInterface
+class ChatGpt implements LLMInterface
 {
     public function send(ChatBean $chatBean): ?ResponseChatBean
     {
         $prompt = $chatBean->getPrompt();
-        $chatBean->setApiKey(config('chat.storage.chatgpt.key'));
+        $chatBean->setApiKey(\Hyperf\Config\config('llm.storage.ChatGpt.key'));
         $responseJsonDescription = $chatBean->getResponseJsonDescription();
         $responseJson = $chatBean->getResponseFormat();
         $openai = new OpenAi($chatBean->getApiKey());
-        $openai->setCustomURL(config('chat.storage.chatgpt.url'));
+        $openai->setCustomURL(\Hyperf\Config\config('llm.storage.ChatGpt.url'));
         $message = $chatBean->getMessages();
         if ($prompt) {
             $message[] = [
@@ -67,7 +66,6 @@ class ChatGpt implements ChatInterface
         if ($chatBean->getStream()) {
             $stream = $chatBean->getCallback() ?? $this->handleStreamV1();
         }
-        print_r($post);
         $response = $openai->chat($post, $stream);
         $result = json_decode($response, true) ?: [];
         $choices = $result['choices'] ?? [];

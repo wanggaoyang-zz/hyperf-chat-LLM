@@ -11,8 +11,8 @@ php bin/hyperf.php vendor:publish hyperf-llm/chat
 ### 使用
 ```
 $chatBean = new ChatBean();
-$chatBean->setApiKey('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');
-$chatBean->setPrompt('给我写一个100字的小说');
+$chatBean->setPrompt('介绍一下hyperf');
 $chatBean->setModel('gpt-3.5-turbo');
-$this->ChatInterface->send($chatBean);
+$llm =  LLMFactory::create();
+$llm ->send($chatBean);
 ```
