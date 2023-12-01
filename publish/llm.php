@@ -1,8 +1,8 @@
 <?php
 return [
-    'default' => 'chatgpt',
+    'default' => 'ChatGpt',
     'storage' => [
-        'chatgpt' => [
+        'ChatGpt' => [
             'key'=>env('CHATGPT_KEY',''),
             'url'=>env('CHATGPT_URL',''),
         ]
