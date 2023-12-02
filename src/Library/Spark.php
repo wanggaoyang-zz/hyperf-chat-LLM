@@ -27,9 +27,9 @@ class Spark implements LLMInterface
         $chatBean->setAppid(\Hyperf\Config\config('llm.storage.Spark.appid'));
         $chatBean->setApiSecret(\Hyperf\Config\config('llm.storage.Spark.api_secret'));
         $chatBean->setApiKey(\Hyperf\Config\config('llm.storage.Spark.api_key'));
-        $messages    = $chatBean->getMessages();
+        $message    = $chatBean->getMessages();
         if ($chatBean->getPrompt()) {
-            $messages[] = [
+            $message[] = [
                 'role' => 'user',
                 'content' => $chatBean->getPrompt(),
             ];
@@ -46,8 +46,8 @@ class Spark implements LLMInterface
         $chat_url = $this->assembleAuthUrl( $chatBean->getApiSecret(),  $chatBean->getApiKey(), $chatBean->getAddr());
         $client = $this->clientFactory->create($chat_url);
         // 发送数据到 WebSocket 服务器
-        $data = $this->getBody($chatBean, $chatBean->getAppid(),$messages,$functions);
-        p($data, '发送给星火的body');
+        $data = $this->getBody($chatBean, $chatBean->getAppid(),$message,$functions);
+        //p($data, '发送给星火的body');
         $client->push($data);
         // 从 WebSocket 服务器接收数据
         $answer = "";
@@ -58,7 +58,7 @@ class Spark implements LLMInterface
             }
             $resp = json_decode($response,true);
             $code = $resp["header"]["code"];
-            p("从星火服务器接收到的数据： " . $response);
+            //p("从星火服务器接收到的数据： " . $response);
             //break;
             if(0 == $code){//0表示正常，非0表示出错
                 $status = $resp["header"]["status"];// 0代表首个文本结果；1代表中间文本结果；2代表最后一个文本结果
@@ -86,7 +86,7 @@ class Spark implements LLMInterface
                     if($stream === true){
                         ChatStream::send("data: " . json_encode($data, 256) . PHP_EOL);
                         ChatStream::end("data: [DONE]" . PHP_EOL);
-                        p("data: [DONE]" . PHP_EOL);
+                        //p("data: [DONE]" . PHP_EOL);
                     }
                     //p("本次消耗token用量：".$total_tokens);
                     break;
@@ -98,7 +98,7 @@ class Spark implements LLMInterface
                     $answer .= $content;
                 }
             }else{
-                p("服务返回报错".$response);
+                //p("服务返回报错".$response);
                 $error_code = $resp["header"]["code"] ?? 0;
                 $error_message = $resp["header"]["message"] ?? '';
                 $exception_code = match ($error_code) {
@@ -125,7 +125,7 @@ class Spark implements LLMInterface
     }
 
     //构造参数体
-    public function getBody(SparkBean $chatBean,$appid,$messages,$functions)
+    public function getBody(SparkBean $chatBean,$appid,$message,$functions)
     {
         $header = array(
             "app_id" => (string)$appid,
@@ -148,22 +148,22 @@ class Spark implements LLMInterface
         );
 
         $system = '';
-        foreach ($messages as $key => $item) {
+        foreach ($message as $key => $item) {
             if ($item['role'] == 'system') {
                 $system .= ($item['content'] ?? '') . PHP_EOL;
-                unset($messages[$key]);
+                unset($message[$key]);
             }
         }
-        $messages = array_values($messages);
+        $message = array_values($message);
         if(!empty($system)){
-            $lastIndex = count($messages) - 1; // 获取最后一个元素
-            $messages[$lastIndex]['content'] = $system . "\r\n我的第一个问题：" . $messages[$lastIndex]['content'];
+            $lastIndex = count($message) - 1; // 获取最后一个元素
+            $message[$lastIndex]['content'] = $system . "\r\n我的第一个问题：" . $message[$lastIndex]['content'];
         }
 
 
         $payload = array(
             "message" => array(
-                "text" => $messages
+                "text" => $message
             ),
         );
         if(!empty($functions)){

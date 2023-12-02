@@ -24,3 +24,4 @@ $chatBean->setPrompt('介绍一下hyperf');
 $llm =  LLMFactory::create();
 $llm ->send($chatBean);
 ```
+

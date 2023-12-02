@@ -6,7 +6,6 @@ namespace AI\Chat\Library;
 
 use AI\Chat\Bean\BeanInterface;
 use AI\Chat\Bean\ResponseChatBean;
-
 use AI\Chat\Bean\WenXinBean;
 use AI\Chat\Constants\ErrorCode;
 use AI\Chat\Kernel\EventStream\ChatStream;
@@ -49,6 +48,12 @@ class WenXinChat implements LLMInterface
         $chat_api = $model == 'ernie_bot_4' ? $this->ernie_bot_4_api : $this->ernie_bot_api;
         $access_token = $this->getAccessToken( $chatBean->getClientId(),  $chatBean->getClientSecret());
         $message = $chatBean->getMessages();
+        if ($chatBean->getPrompt()) {
+            $message[] = [
+                'role' => 'user',
+                'content' => $chatBean->getPrompt(),
+            ];
+        }
         // 模型人设，主要用于人设设定，例如，你是xxx公司制作的AI助手，说明：
         //（1）长度限制1024个字符
         //（2）如果使用functions参数，不支持设定人设system
@@ -109,8 +114,6 @@ class WenXinChat implements LLMInterface
         if($post['top_p'] == 0.0){
             unset($post['top_p']);
         }
-
-        p($post);
         if($chatBean->getStream() === false){
             try {
                 $res = $this->client->post($this->base_api . $chat_api.'?access_token='.$access_token, [
@@ -140,7 +143,7 @@ class WenXinChat implements LLMInterface
             $this->request($this->base_api . $chat_api.'?access_token='.$access_token, $post, function ($ch, $data) use (&$text, &$result, $chatBean) {
                 $bytes = $data_chat = $data;
                 $response = json_decode($data_chat, true);
-                p($response, '文心流式返回');
+                //p($response, '文心流式返回');
                 if(isset($response['error_code'])){
                     self::handleChatAPIError( $response);
                 }
@@ -157,11 +160,11 @@ class WenXinChat implements LLMInterface
                     $data = substr($buf, 0, $pos + 1);
                     $buf = substr($buf, $pos + 1);
                     $data = self::parseEventStreamData($data);
-                    p('流式开始');
+                    //p('流式开始');
                     foreach ($data as $message) {
                         $data_chat = json_decode($message, true);
                         if ($data_chat['is_end']) {
-                            p('流式结束');
+                            //p('流式结束');
                             ChatStream::end("data: [DONE]" . PHP_EOL);
                             break;
                         } else {
@@ -179,7 +182,7 @@ class WenXinChat implements LLMInterface
                                 $text .= $data_chat['result'] ?? '';
                                 $data_chat['choices'][0]['delta']['content'] = $data_chat['result'];
                                 unset($data_chat['result']);
-                                p(json_encode($data_chat, 256) . PHP_EOL, '流式输出');
+                                //p(json_encode($data_chat, 256) . PHP_EOL, '流式输出');
                                 //兼容下小程序 之前小程序的流式格式略有不同
                                 if($chatBean->getIsRoutine() == 1){
                                     ChatStream::send('data: ' . json_encode(['content' => $text, 'id' => time(), 'code' => 200], 256) . PHP_EOL);
@@ -193,7 +196,7 @@ class WenXinChat implements LLMInterface
                 return $bytes;
             });
         } catch (\Throwable $exception) {
-            p($exception->getMessage(), '文心http异常');
+            //p($exception->getMessage(), '文心http异常');
             throw new Exception($exception->getMessage());
         }
         return $responseBean;
@@ -238,23 +241,37 @@ class WenXinChat implements LLMInterface
         throw new Exception($exception_code);
     }
 
-    public function request($url, $data = [], $fun = null)
+    public function request($url, $opts = [], $fun = null)
     {
-        // setup the api request
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, $fun);
-        curl_setopt($ch, CURLOPT_TCP_KEEPALIVE, 1);   // 开启
-        curl_setopt($ch, CURLOPT_TCP_KEEPIDLE, 10);   // 空闲10秒问一次
-        curl_setopt($ch, CURLOPT_TCP_KEEPINTVL, 10);  // 每10秒问一次
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        $post_fields = json_encode($opts);
+        $curl_info = [
+            CURLOPT_URL            => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TCP_KEEPALIVE       =>1,
+            CURLOPT_TCP_KEEPIDLE      => 10,
+            CURLOPT_TCP_KEEPINTVL      => 10,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_POST  => 1,
+            CURLOPT_POSTFIELDS     => $post_fields,
+            CURLOPT_HTTPHEADER     => [
                 'Content-Type: application/json; charset=utf-8',
-            ]
-        );
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-        $result = curl_exec($ch);
-        curl_close($ch);
-        return $result;
+            ],
+        ];
+        if ($opts == []) {
+            unset($curl_info[CURLOPT_POSTFIELDS]);
+        }
+        if (array_key_exists('stream', $opts) && !empty($fun)) {
+            $curl_info[CURLOPT_WRITEFUNCTION] = $fun;
+        }
+        $curl = curl_init();
+        curl_setopt_array($curl, $curl_info);
+        $response = curl_exec($curl);
+        //$info           = curl_getinfo($curl);
+        curl_close($curl);
+        if (!$response) throw new Exception(curl_error($curl));
+        return $response;
+
     }
 
 }
